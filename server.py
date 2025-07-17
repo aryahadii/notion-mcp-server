@@ -2,21 +2,71 @@
 """
 Notion MCP SSE Server
 A simple MCP server that provides read-only access to Notion pages via SSE transport.
+Includes Bearer token authentication for SSE endpoints.
 """
 
 import os
-import asyncio
-from typing import Dict, Any, List
+import time
+from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 from fastmcp import FastMCP, Context
+from fastmcp.server.auth import BearerAuthProvider
 from notion_client import AsyncClient
 from notion_client.errors import APIResponseError
+import jwt
 
 # Load environment variables
 load_dotenv()
 
-# Initialize FastMCP server
-mcp = FastMCP(name="notion-mcp-sse")
+# Setup Bearer token authentication with RSA keys
+rsa_public_key = os.getenv("RSA_PUBLIC_KEY")
+rsa_private_key = os.getenv("RSA_PRIVATE_KEY")
+
+if not rsa_public_key:
+    raise ValueError("RSA_PUBLIC_KEY environment variable is required for authentication")
+
+# Configure authentication provider with RSA public key
+auth_provider = BearerAuthProvider(
+    public_key=rsa_public_key,  # RSA public key for token validation
+    algorithm="RS256",         # RS256 algorithm for RSA-based signatures
+    audience="notion-mcp"      # Expected audience claim in the token
+)
+
+# Token generation utility function
+def generate_token(subject: str, scopes: Optional[list] = None, expiry_seconds: int = 3600) -> str:
+    """
+    Generate a JWT token signed with RSA_PRIVATE_KEY.
+
+    Args:
+        subject: Subject identifier (usually user ID)
+        scopes: List of permission scopes to include in the token
+        expiry_seconds: Token validity period in seconds (default: 1 hour)
+
+    Returns:
+        Signed JWT token string
+    """
+    if not rsa_private_key:
+        raise ValueError("RSA_PRIVATE_KEY environment variable is required for token generation")
+
+    now = int(time.time())
+    payload = {
+        "sub": subject,
+        "iss": "notion-mcp-auth",
+        "aud": "notion-mcp",
+        "iat": now,
+        "exp": now + expiry_seconds
+    }
+
+    # Add scopes if provided
+    if scopes:
+        payload["scope"] = " ".join(scopes)
+
+    # Sign the token with the private key using RS256 algorithm
+    token = jwt.encode(payload, rsa_private_key, algorithm="RS256")
+    return token
+
+# Initialize FastMCP server with authentication
+mcp = FastMCP(name="notion-mcp-sse", auth=auth_provider)
 
 # Initialize Notion client
 notion_token = os.getenv("NOTION_TOKEN")
@@ -58,10 +108,10 @@ async def get_page(page_id: str, ctx: Context) -> Dict[str, Any]:
 
     except APIResponseError as e:
         await ctx.error(f"Notion API error: {e}")
-        raise Exception(f"Failed to retrieve page {page_id}: {e}")
+        raise NotionAPIError(f"Failed to retrieve page {page_id}: {e}") from e
     except Exception as e:
         await ctx.error(f"Unexpected error: {e}")
-        raise Exception(f"Failed to retrieve page {page_id}: {e}")
+        raise NotionRequestError(f"Failed to retrieve page {page_id}: {e}") from e
 
 
 @mcp.tool
@@ -109,10 +159,10 @@ async def search_pages(query: str, ctx: Context, page_size: int = 10) -> Dict[st
 
     except APIResponseError as e:
         await ctx.error(f"Notion API error: {e}")
-        raise Exception(f"Failed to search pages: {e}")
+        raise Exception(f"Failed to search pages: {e}") from e
     except Exception as e:
         await ctx.error(f"Unexpected error: {e}")
-        raise Exception(f"Failed to search pages: {e}")
+        raise Exception(f"Failed to search pages: {e}") from e
 
 
 @mcp.tool
@@ -142,10 +192,10 @@ async def get_database(database_id: str, ctx: Context) -> Dict[str, Any]:
 
     except APIResponseError as e:
         await ctx.error(f"Notion API error: {e}")
-        raise Exception(f"Failed to retrieve database {database_id}: {e}")
+        raise Exception(f"Failed to retrieve database {database_id}: {e}") from e
     except Exception as e:
         await ctx.error(f"Unexpected error: {e}")
-        raise Exception(f"Failed to retrieve database {database_id}: {e}")
+        raise Exception(f"Failed to retrieve database {database_id}: {e}") from e
 
 
 @mcp.tool
@@ -186,12 +236,36 @@ async def query_database(database_id: str, page_size: str, ctx: Context) -> Dict
 
     except APIResponseError as e:
         await ctx.error(f"Notion API error: {e}")
-        raise Exception(f"Failed to query database {database_id}: {e}")
+        raise Exception(f"Failed to query database {database_id}: {e}") from e
     except Exception as e:
         await ctx.error(f"Unexpected error: {e}")
-        raise Exception(f"Failed to query database {database_id}: {e}")
+        raise Exception(f"Failed to query database {database_id}: {e}") from e
 
 
+
+
+def generate_auth_token(subject: str, scopes: Optional[list] = None, expiry_seconds: int = 3600) -> Dict[str, Any]:
+    """
+    Generate an authentication token for testing.
+
+    Args:
+        subject: Subject identifier (usually user ID)
+        scopes: List of permission scopes (optional)
+        expiry_seconds: Token validity period in seconds (default: 1 hour)
+
+    Returns:
+        Dict containing the token and its expiry time
+    """
+    try:
+        token = generate_token(subject, scopes, expiry_seconds)
+        return {
+            "token": token,
+            "expires_in": expiry_seconds,
+            "token_type": "Bearer"
+        }
+    except Exception as e:
+        # Properly re-raise with context
+        raise Exception(f"Failed to generate token: {e}") from e
 
 
 def main():
@@ -200,6 +274,7 @@ def main():
     port = int(os.getenv("PORT", "8000"))
 
     print(f"Starting Notion MCP SSE Server on {host}:{port}")
+    print(f"Authentication: Enabled (RSA key-based)")
 
     # Run the server with SSE transport
     mcp.run(transport="sse", host=host, port=port)

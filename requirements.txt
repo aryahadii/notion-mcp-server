@@ -1,3 +1,4 @@
 fastmcp
 notion-client
 python-dotenv
+PyJWT

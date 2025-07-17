@@ -6,6 +6,7 @@ A simple MCP (Model Context Protocol) server that provides read-only access to N
 
 - **Read-only access** to Notion pages and databases
 - **SSE transport** for real-time communication
+- **Bearer token authentication** for secure SSE endpoints
 - **Docker deployment** ready
 - **Simple configuration** via environment variables
 - **Comprehensive error handling** and logging
@@ -30,16 +31,28 @@ A simple MCP (Model Context Protocol) server that provides read-only access to N
 ### 2. Environment Configuration
 
 1. Copy the example environment file:
+
    ```bash
    cp .env.example .env
    ```
 
-2. Edit `.env` and add your Notion token:
-   ```
+2. Edit `.env` and add your Notion token and RSA keys for authentication:
+
+   ```env
    NOTION_TOKEN=ntn_your_integration_token_here
+   RSA_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n...your public key...\n-----END PUBLIC KEY-----"
+   RSA_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...your private key...\n-----END PRIVATE KEY-----"
    HOST=127.0.0.1
    PORT=8000
    ```
+
+   > **Note:** For RSA key generation, you can use OpenSSL:
+   > ```bash
+   > # Generate private key
+   > openssl genpkey -algorithm RSA -out private_key.pem -pkeyopt rsa_keygen_bits:2048
+   > # Extract public key
+   > openssl rsa -pubout -in private_key.pem -out public_key.pem
+   > ```
 
 ### 3. Installation & Running
 
@@ -77,9 +90,45 @@ The following tools are available for interacting with Notion:
 - `get_database(database_id: str)`: Retrieves information about a specific Notion database.
 - `query_database(database_id: str, page_size: int = 10)`: Queries a Notion database and returns its pages.
 
+## Authentication
+
+This server implements Bearer token authentication for SSE endpoints using RSA key pairs:
+
+- **JWT Tokens**: Authentication uses JWT tokens signed with RS256 algorithm
+- **RSA Key Pairs**: Uses asymmetric cryptography for secure token validation
+- **Token Generation**: Includes a utility endpoint to generate tokens for testing
+
+### Using Authentication
+
+1. **Generate a token** using the `/generate_auth_token` endpoint:
+
+   ```bash
+   curl -X POST http://localhost:8000/generate_auth_token \
+     -H "Content-Type: application/json" \
+     -d '{"subject":"user123","scopes":["read"],"expiry_seconds":3600}'
+   ```
+
+2. **Use the token** in your SSE requests:
+
+   ```bash
+   curl -N http://localhost:8000/sse \
+     -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+   ```
+
+### Testing Authentication
+
+A test script is included to verify authentication is working correctly:
+
+```bash
+python test_auth.py
+```
+
+This will test both authenticated and unauthenticated requests to ensure the Bearer token authentication is functioning properly.
+
 ## Security
 
 - This server provides **read-only** access to Notion
+- Bearer token authentication secures all SSE endpoints
 - Configure your Notion integration with minimal permissions
 - Use environment variables for sensitive configuration
 - The server only exposes data that your integration has access to
