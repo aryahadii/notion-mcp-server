@@ -15,9 +15,17 @@ from pydantic import SecretStr
 # Load environment variables from .env file if present
 load_dotenv()
 
-# Read RSA key pair from environment variables
-rsa_private_key = os.getenv("RSA_PRIVATE_KEY")
-rsa_public_key = os.getenv("RSA_PUBLIC_KEY")
+# Read RSA key pair from environment variables (base64-encoded PEM)
+import base64
+rsa_private_key_b64 = os.getenv("RSA_PRIVATE_KEY")
+rsa_public_key_b64 = os.getenv("RSA_PUBLIC_KEY")
+
+if not rsa_private_key_b64 or not rsa_public_key_b64:
+    rsa_private_key = None
+    rsa_public_key = None
+else:
+    rsa_private_key = base64.b64decode(rsa_private_key_b64.encode()).decode("utf-8")
+    rsa_public_key = base64.b64decode(rsa_public_key_b64.encode()).decode("utf-8")
 
 if not rsa_private_key or not rsa_public_key:
     print("\033[91m")  # Red color

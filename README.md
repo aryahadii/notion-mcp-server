@@ -36,15 +36,30 @@ A simple MCP (Model Context Protocol) server that provides read-only access to N
    cp .env.example .env
    ```
 
-2. Edit `.env` and add your Notion token and RSA keys for authentication:
+2. Edit `.env` and add your Notion token and **base64-encoded** RSA keys for authentication:
 
    ```env
    NOTION_TOKEN=ntn_your_integration_token_here
-   RSA_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n...your public key...\n-----END PUBLIC KEY-----"
-   RSA_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...your private key...\n-----END PRIVATE KEY-----"
+   RSA_PUBLIC_KEY="<base64-encoded-PEM-public-key>"
+   RSA_PRIVATE_KEY="<base64-encoded-PEM-private-key>"
    HOST=127.0.0.1
    PORT=8000
    ```
+
+   > **Important:** The keys **must be base64-encoded PEM strings**, not raw PEM. If you do not have base64-encoded keys, you can generate them as follows:
+   > ```bash
+   > # Generate private key
+   > openssl genpkey -algorithm RSA -out private_key.pem -pkeyopt rsa_keygen_bits:2048
+   > # Extract public key
+   > openssl rsa -pubout -in private_key.pem -out public_key.pem
+   > # Encode keys as base64 (remove newlines for .env compatibility)
+   > base64 -w 0 private_key.pem > private_key.b64
+   > base64 -w 0 public_key.pem > public_key.b64
+   > ```
+   > Then copy the contents of `private_key.b64` and `public_key.b64` into your `.env` as shown above.
+   >
+   > Alternatively, if you start the server or run `python generate_client_token.py` without the keys set, it will print out base64-encoded keys for you to copy into your `.env` file.
+
 
    > **Note:** For RSA key generation, you can use OpenSSL:
    > ```bash

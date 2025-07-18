@@ -18,12 +18,23 @@ import jwt
 # Load environment variables
 load_dotenv()
 
-# Setup Bearer token authentication with RSA keys
-rsa_public_key = os.getenv("RSA_PUBLIC_KEY")
-rsa_private_key = os.getenv("RSA_PRIVATE_KEY")
+# Setup Bearer token authentication with RSA keys (base64-encoded PEM)
+import base64
+rsa_public_key_b64 = os.getenv("RSA_PUBLIC_KEY")
+rsa_private_key_b64 = os.getenv("RSA_PRIVATE_KEY")
 
-if not rsa_public_key:
+if not rsa_public_key_b64:
     raise ValueError("RSA_PUBLIC_KEY environment variable is required for authentication")
+
+if rsa_public_key_b64:
+    rsa_public_key = base64.b64decode(rsa_public_key_b64.encode()).decode("utf-8")
+else:
+    rsa_public_key = None
+
+if rsa_private_key_b64:
+    rsa_private_key = base64.b64decode(rsa_private_key_b64.encode()).decode("utf-8")
+else:
+    rsa_private_key = None
 
 # Configure authentication provider with RSA public key
 auth_provider = BearerAuthProvider(
