@@ -119,16 +119,16 @@ async def get_page(page_id: str, ctx: Context) -> Dict[str, Any]:
 
     except APIResponseError as e:
         await ctx.error(f"Notion API error: {e}")
-        raise NotionAPIError(f"Failed to retrieve page {page_id}: {e}") from e
+        raise RuntimeError(f"Failed to retrieve page {page_id}: {e}") from e
     except Exception as e:
         await ctx.error(f"Unexpected error: {e}")
-        raise NotionRequestError(f"Failed to retrieve page {page_id}: {e}") from e
+        raise RuntimeError(f"Failed to retrieve page {page_id}: {e}") from e
 
 
 @mcp.tool
 async def search_pages(query: str, ctx: Context, page_size: int = 10) -> Dict[str, Any]:
     """
-    Search for pages in Notion workspace.
+    Search for pages and databases in Notion workspace.
 
     Args:
         ctx: MCP context for logging
@@ -136,10 +136,10 @@ async def search_pages(query: str, ctx: Context, page_size: int = 10) -> Dict[st
         page_size: Number of results to return (default: 10, max: 100)
 
     Returns:
-        Dict containing search results
+        Dict containing search results with both pages and databases
     """
     try:
-        await ctx.info(f"Searching pages with query: '{query}'")
+        await ctx.info(f"Searching pages and databases with query: '{query}'")
 
         # Convert and limit page size to prevent excessive API calls
         try:
@@ -148,7 +148,8 @@ async def search_pages(query: str, ctx: Context, page_size: int = 10) -> Dict[st
             page_size = 10
         page_size = min(page_size, 100)
 
-        search_params = {
+        # Search for pages
+        page_search_params = {
             "page_size": page_size,
             "filter": {
                 "property": "object",
@@ -156,40 +157,59 @@ async def search_pages(query: str, ctx: Context, page_size: int = 10) -> Dict[st
             }
         }
 
+        # Search for databases
+        db_search_params = {
+            "page_size": page_size,
+            "filter": {
+                "property": "object",
+                "value": "database"
+            }
+        }
+
         # Handle empty query parameter
         if query and query != "all":
-            search_params["query"] = query
+            page_search_params["query"] = query
+            db_search_params["query"] = query
 
-        results = await notion.search(**search_params)
+        # Execute both searches concurrently
+        page_results = await notion.search(**page_search_params)
+        db_results = await notion.search(**db_search_params)
+
+        # Combine results
+        combined_results = []
+        combined_results.extend(page_results.get("results", []))
+        combined_results.extend(db_results.get("results", []))
 
         return {
-            "results": results.get("results", []),
-            "has_more": results.get("has_more", False),
-            "next_cursor": results.get("next_cursor")
+            "results": combined_results,
+            "has_more": page_results.get("has_more", False) or db_results.get("has_more", False),
+            "next_cursor": page_results.get("next_cursor") or db_results.get("next_cursor"),
+            "page_count": len(page_results.get("results", [])),
+            "database_count": len(db_results.get("results", []))
         }
 
     except APIResponseError as e:
         await ctx.error(f"Notion API error: {e}")
-        raise Exception(f"Failed to search pages: {e}") from e
+        raise Exception(f"Failed to search pages and databases: {e}") from e
     except Exception as e:
         await ctx.error(f"Unexpected error: {e}")
-        raise Exception(f"Failed to search pages: {e}") from e
+        raise Exception(f"Failed to search pages and databases: {e}") from e
 
 
 @mcp.tool
 async def get_database(database_id: str, ctx: Context) -> Dict[str, Any]:
     """
-    Retrieve a Notion database by its ID.
+    Retrieve a Notion database by its ID and fetch pages inside it.
 
     Args:
         database_id: The Notion database ID
         ctx: MCP context for logging
 
     Returns:
-        Dict containing database information
+        Dict containing database information and its pages
     """
     try:
-        await ctx.info(f"Fetching database: {database_id}")
+        await ctx.info(f"Fetching database and its pages: {database_id}")
 
         # Clean database ID
         clean_db_id = database_id.replace("-", "")
@@ -197,8 +217,15 @@ async def get_database(database_id: str, ctx: Context) -> Dict[str, Any]:
         # Get database info
         database = await notion.databases.retrieve(database_id=clean_db_id)
 
+        # Query database to get pages inside it
+        pages_response = await notion.databases.query(database_id=clean_db_id)
+
         return {
-            "database": database
+            "database": database,
+            "pages": pages_response.get("results", []),
+            "has_more": pages_response.get("has_more", False),
+            "next_cursor": pages_response.get("next_cursor"),
+            "page_count": len(pages_response.get("results", []))
         }
 
     except APIResponseError as e:
@@ -207,52 +234,6 @@ async def get_database(database_id: str, ctx: Context) -> Dict[str, Any]:
     except Exception as e:
         await ctx.error(f"Unexpected error: {e}")
         raise Exception(f"Failed to retrieve database {database_id}: {e}") from e
-
-
-@mcp.tool
-async def query_database(database_id: str, page_size: str, ctx: Context) -> Dict[str, Any]:
-    """
-    Query a Notion database for its pages.
-
-    Args:
-        database_id: The Notion database ID
-        ctx: MCP context for logging
-        page_size: Number of results to return (default: 10, max: 100)
-
-    Returns:
-        Dict containing database query results
-    """
-    try:
-        await ctx.info(f"Querying database: {database_id}")
-
-        # Clean database ID and convert/limit page size
-        clean_db_id = database_id.replace("-", "")
-        try:
-            page_size = int(page_size)
-        except (ValueError, TypeError):
-            page_size = 10
-        page_size = min(page_size, 100)
-
-        # Query database
-        results = await notion.databases.query(
-            database_id=clean_db_id,
-            page_size=page_size
-        )
-
-        return {
-            "results": results.get("results", []),
-            "has_more": results.get("has_more", False),
-            "next_cursor": results.get("next_cursor")
-        }
-
-    except APIResponseError as e:
-        await ctx.error(f"Notion API error: {e}")
-        raise Exception(f"Failed to query database {database_id}: {e}") from e
-    except Exception as e:
-        await ctx.error(f"Unexpected error: {e}")
-        raise Exception(f"Failed to query database {database_id}: {e}") from e
-
-
 
 
 def generate_auth_token(subject: str, scopes: Optional[list] = None, expiry_seconds: int = 3600) -> Dict[str, Any]:
